@@ -1,11 +1,15 @@
 from __future__ import print_function
 import argparse
+import os
+import shutil
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torchvision import datasets, transforms
 from torch.autograd import Variable
+import matplotlib.pyplot as plt
 
 # Training settings
 parser = argparse.ArgumentParser(description='PyTorch MNIST Example')
@@ -13,10 +17,10 @@ parser.add_argument('--batch-size', type=int, default=64, metavar='N',
                     help='input batch size for training (default: 64)')
 parser.add_argument('--test-batch-size', type=int, default=1000, metavar='N',
                     help='input batch size for testing (default: 1000)')
-parser.add_argument('--epochs', type=int, default=10, metavar='N',
+parser.add_argument('--epochs', type=int, default=500, metavar='N',
                     help='number of epochs to train (default: 10)')
-parser.add_argument('--lr', type=float, default=0.01, metavar='LR',
-                    help='learning rate (default: 0.01)')
+parser.add_argument('--lr', type=float, default=0.05, metavar='LR',
+                    help='learning rate (default: 0.05)')
 parser.add_argument('--momentum', type=float, default=0.5, metavar='M',
                     help='SGD momentum (default: 0.5)')
 parser.add_argument('--no-cuda', action='store_true', default=False,
@@ -34,34 +38,68 @@ if args.cuda:
 
 
 kwargs = {'num_workers': 1, 'pin_memory': True} if args.cuda else {}
+
+
+args.data = './andy_project/';
+traindir = os.path.join(args.data, 'train')
+valdir = os.path.join(args.data, 'val')
+normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                     std=[0.229, 0.224, 0.225])
+train_dataset = datasets.ImageFolder(
+    traindir,
+    transforms.Compose([
+        transforms.RandomSizedCrop(224),
+        transforms.RandomHorizontalFlip(),
+        transforms.ToTensor(),
+        normalize,
+    ]))
+    
 train_loader = torch.utils.data.DataLoader(
-    datasets.MNIST('../data', train=True, download=True,
-                   transform=transforms.Compose([
-                       transforms.ToTensor(),
-                       transforms.Normalize((0.1307,), (0.3081,))
-                   ])),
-    batch_size=args.batch_size, shuffle=True, **kwargs)
-test_loader = torch.utils.data.DataLoader(
-    datasets.MNIST('../data', train=False, transform=transforms.Compose([
-                       transforms.ToTensor(),
-                       transforms.Normalize((0.1307,), (0.3081,))
-                   ])),
-    batch_size=args.test_batch_size, shuffle=True, **kwargs)
+    train_dataset, batch_size=40, shuffle=True)
 
+val_loader = torch.utils.data.DataLoader(
+    datasets.ImageFolder(valdir, transforms.Compose([
+        transforms.Scale(256),
+        transforms.CenterCrop(224),
+        transforms.ToTensor(),
+        normalize,
+    ])),
+    batch_size=40, shuffle=True, pin_memory=True)
 
+#class Net(nn.Module):
+#    def __init__(self):
+#        super(Net, self).__init__()
+#        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+#        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+#        self.conv2_drop = nn.Dropout2d()
+#        self.fc1 = nn.Linear(320, 50)
+#        self.fc2 = nn.Linear(50, 10)
+#
+#    def forward(self, x):
+#        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+#        x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
+#        x = x.view(-1, 256*256)
+#        x = F.relu(self.fc1(x))
+#        x = F.dropout(x, training=self.training)
+#        x = self.fc2(x)
+#        return F.log_softmax(x)
+    
 class Net(nn.Module):
     def __init__(self):
         super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
-        self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+        self.conv1 = nn.Conv2d(3, 16, kernel_size=3)
+        self.conv1_drop = nn.Dropout2d()
+        self.conv2 = nn.Conv2d(16, 64, kernel_size=3)
         self.conv2_drop = nn.Dropout2d()
-        self.fc1 = nn.Linear(320, 50)
-        self.fc2 = nn.Linear(50, 10)
+        self.fc1 = nn.Linear(64*54*54, 512)
+        self.fc2 = nn.Linear(512, 120)
 
     def forward(self, x):
-        x = F.relu(F.max_pool2d(self.conv1(x), 2))
+#        print(x)
+        x = F.relu(F.max_pool2d(self.conv1_drop(self.conv1(x)), 2))
         x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
-        x = x.view(-1, 320)
+#        print(x)
+        x = x.view(-1, 64*54*54)
         x = F.relu(self.fc1(x))
         x = F.dropout(x, training=self.training)
         x = self.fc2(x)
@@ -76,6 +114,8 @@ optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum)
 def train(epoch):
     model.train()
     for batch_idx, (data, target) in enumerate(train_loader):
+        print(batch_idx)
+        
         if args.cuda:
             data, target = data.cuda(), target.cuda()
         data, target = Variable(data), Variable(target)
@@ -93,7 +133,7 @@ def test():
     model.eval()
     test_loss = 0
     correct = 0
-    for data, target in test_loader:
+    for data, target in val_loader:
         if args.cuda:
             data, target = data.cuda(), target.cuda()
         data, target = Variable(data, volatile=True), Variable(target)
@@ -102,12 +142,33 @@ def test():
         pred = output.data.max(1, keepdim=True)[1] # get the index of the max log-probability
         correct += pred.eq(target.data.view_as(pred)).cpu().sum()
 
-    test_loss /= len(test_loader.dataset)
+    test_loss /= len(val_loader.dataset)
     print('\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n'.format(
-        test_loss, correct, len(test_loader.dataset),
-        100. * correct / len(test_loader.dataset)))
+        test_loss, correct, len(val_loader.dataset),
+        100. * correct / len(val_loader.dataset)))
+    return (100. * correct / len(val_loader.dataset))
 
+
+
+    
+test_result = []
+
+fig = plt.figure()
+fig.suptitle('Training Accuracy Caries VS. Sound', fontsize=14, fontweight='bold')
+
+ax = fig.add_subplot(111)
+fig.subplots_adjust(top=0.85)
+
+ax.set_xlabel('iteration')
+ax.set_ylabel('accuracy (%)')
 
 for epoch in range(1, args.epochs + 1):
     train(epoch)
-    test()
+    accuracy = test()
+    test_result.append(accuracy)
+    lst=list(range(len(test_result)))
+    plt.plot(lst, test_result, color='lightblue', linewidth=3)
+    plt.draw()
+    plt.pause(1e-17)
+    time.sleep(0.1)
+        
